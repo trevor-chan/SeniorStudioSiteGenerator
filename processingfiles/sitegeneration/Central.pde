@@ -18,15 +18,26 @@ class Central{
     fill(255, 255, 255);
   }
   
-  void move(float delx, float dely){
-    //move away from mean of nearest neighbors by distance inversely proportional to distance to mean
+  void move_constrained(float delx, float dely){
     if (delx > 1){ 
       delx = 1;
+    }
+    if (delx < -1){
+      delx = -1;
     }
     if (dely > 1){ 
       dely = 1;
     }
-    x = x+delx;
-    y = y+dely;
+    if (dely < -1){
+      dely = -1;
+    }
+    x += delx;
+    y += dely;
   }
+  
+  void move(float delx, float dely){
+    x += delx;
+    y += dely;
+  }
+  
  }

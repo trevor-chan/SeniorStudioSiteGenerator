@@ -5,14 +5,19 @@ class Site{
   int[][] adjacency;
   float mobility;
   Central cc;
+  int numclusters;
+  int sitespercluster = 10;
   
   
-  Site(int numcamps, int numnearest, float mobil){ //add other amenities here as they are implemented
+  Site(int numcamps, int numnearest, float mobil, int clustersize){ //add other amenities here as they are implemented
     //initialize campsites, place randomly
     numcampgrounds = numcamps;
     numnearestneighbors = numnearest;
     campgrounds = new Camp[numcamps];
     mobility = mobil;
+    sitespercluster = clustersize;
+    numclusters = numcampgrounds/sitespercluster; // Variable dependent on how many camps to a cluster ------------------
+    
     
     for(int i = 0; i < numcamps; i++){
       //campgrounds[i] = new Camp(i, random(width*.1,width*.9), random 
@@ -23,9 +28,62 @@ class Site{
     }
     
     cc = new Central();
-    
+    build_central();
     build_nearest_neighbor();
     build_adjacency_list();
+  }
+  
+  Site(KMeans km, Site oldsite){ //makes a new site from KMeans structure and the incomplete old site
+    numcampgrounds = oldsite.numcampgrounds;
+    numnearestneighbors = oldsite.numnearestneighbors;
+    mobility = oldsite.mobility;
+    numclusters = oldsite.numclusters;
+    cc = oldsite.cc;
+    campgrounds = new Camp[numcampgrounds];
+    
+    //make campgrounds
+    int iter = 0;
+    //int iter2 = 0; // if display numbers should cound 1->n for each cluster, make a separate number for display number and campsite number
+    for (int i = 0; i < km.numclusters; i++){
+      for (int j = 0; j < km.clusters.get(i).points.size(); j++){
+      
+      campgrounds[iter] = new Camp(iter, (float)km.clusters.get(i).points.get(j).x, 
+      (float) km.clusters.get(i).points.get(j).y, 0, numnearestneighbors, i);
+      iter++;
+      }
+    }
+    
+    place_guests();
+    place_bathrooms(km);
+    
+    //make adjacency
+    build_nearest_neighbor();
+    build_adjacency_list();
+  }
+  
+  
+  void display(){
+    background(backgroundColor);
+    //v.drawVFraster(graphics); //-----------------------------------------------
+    for(Camp s: campgrounds){
+      s.display();
+    }
+    plotlines();
+    cc.display();
+    v.drawVFlines(graphics, 1);
+    
+  }
+  
+  void displaynobkgd(){
+    //background(backgroundColor);
+    //v.drawVFraster(graphics); //-----------------------------------------------
+    for(Camp s: campgrounds){
+      s.display();
+    }
+    
+    //cc.display();
+    v.drawVFlines(graphics, 1);
+    plotlines();
   }
   
   void build_nearest_neighbor(){    //create nearestneighbor lists for all camps
@@ -69,17 +127,8 @@ class Site{
     cc.y = ymean;
   }
   
-  void display(){
-    background(0,0,0);
-    for(Camp s: campgrounds){
-      s.display();
-    }
-    plotlines();
-    cc.display();
-  }
-  
   void plotlines(){
-    stroke(255,255,255,30);
+    stroke(255,255,255,50);//-----------------------------------------
     for(int i = 0; i < numcampgrounds; i++){
       for(int j = 0; j < numcampgrounds; j++){
         if (adjacency[i][j] == 1){
@@ -88,6 +137,57 @@ class Site{
       }
     }
   }
+  
+  void place_guests(){  // replaces a random node in each cluster with a guest campsite
+    println("numclusters = " + numclusters);
+    final int numgestspercluster = 2;
+    int temp = 0;
+    for (int i = 0; i < numclusters; i++){
+      for (int j = 0; j < numcampgrounds; j++){
+        if (campgrounds[j].clusterid == i)
+        {
+          campgrounds[j].type = 1;
+          temp++;
+          //println("GUESTS: break when cluster number = " + i);
+          if (temp == numgestspercluster){break;}
+        }
+      }
+      temp = 0;
+    }
+  }
+  
+  void place_bathrooms(KMeans km){  // replaces node of site nearest to each cluster's centroid with a bathroom
+    float mindist = width*height;
+    float tempdist = 0;
+    int tempindex = 0;
+    for (int i = 0; i < numclusters; i++){
+      for (int j = 0; j < numcampgrounds; j++){
+        //find node closest to centroid
+        if (campgrounds[j].clusterid == i){ 
+          tempdist = sqrt(pow(campgrounds[j].x-(float)km.clusters.get(i).centroid.x,2)
+          +pow(campgrounds[j].y-(float)km.clusters.get(i).centroid.y,2));
+          if (tempdist < mindist){
+            mindist = tempdist;
+            tempindex = j;
+          }
+        }
+        
+      }
+      mindist = width*height;
+      println("build rstrm for cluster " + i + " from " + tempindex + " of cluster " + campgrounds[tempindex].clusterid);
+      campgrounds[tempindex].type = 2;
+      km.clusters.get(i).plotCentroids();
+    }
+    
+    
+  }
+  
+  
+  
+  
+  
+  
+  
   
   void move_towards_mean(){
     float[] meanx = new float[numcampgrounds];
@@ -169,7 +269,7 @@ class Site{
       }
     }
     for (int i = 0; i < numcampgrounds; i++){
-      campgrounds[i].move(dirx[i],diry[i]);
+      campgrounds[i].move_constrained(dirx[i],diry[i]);
     }
     //rebuild adjacencies
     build_nearest_neighbor();
@@ -210,7 +310,8 @@ class Site{
     float[] diry = new float[numcampgrounds];
     for (int i = 0; i < numcampgrounds; i++){
       for (int j = 0; j < numnearestneighbors; j++){    
-        dirr = lennard_jones(pveclist[i][j].dr, distconst, mobility);
+        dirr = lennard_jones(pveclist[i][j].dr, distconst, mobility, 10);
+        //dirr = quartic(pveclist[i][j].dr, 1000000, 200);
         tempp.dr = dirr;
         tempp.dtheta = pveclist[i][j].dtheta;
         tempc = ptoc(tempp);
@@ -222,9 +323,9 @@ class Site{
     
     for (int i = 0; i < numcampgrounds; i++){
       //campgrounds[i].move(dirx[i],diry[i]);
-      campgrounds[i].move_unconstrained(dirx[i],diry[i]);
+      campgrounds[i].move(dirx[i],diry[i]);
       
-      println(dirx[i] + " " + diry[i]); //-------------------------------------------------
+      //println(dirx[i] + " " + diry[i]); //-------------------------------------------------
       
     }
     //rebuild adjacencies
@@ -232,21 +333,37 @@ class Site{
     build_adjacency_list();
   }
   
-  void move_radial_central(){ 
-    float distconst = 5;
-    //for each nearest neighbor, calculate a repel force based on component deltas
-    float[] delx = new float[numcampgrounds];
-    float[] dely = new float[numcampgrounds];    
+  void move_radial_central(float distconst){ 
+    //move all sites to a distance relative to central
+    
+    float delx;
+    float dely;
+    //calculate vector difference between two points as cartesian and polar vectors for each neighbor
+    cvec[] cveclist = new cvec[numcampgrounds];
+    pvec[] pveclist = new pvec[numcampgrounds];
     for (int i = 0; i < numcampgrounds; i++){
-      delx[i] = campgrounds[i].x-cc.x;
-      dely[i] = campgrounds[i].y-cc.y;
+      delx = campgrounds[i].x-cc.x;
+      dely = campgrounds[i].y-cc.y;
+      cveclist[i] = new cvec(delx,dely);
+      pveclist[i] = ctop(cveclist[i]);
     }
+
+    //calculate resultant move coordinates as an x and y component for each neighbor and sum
+    float dirr;
+    pvec tempp = new pvec(0,0);
+    cvec tempc = new cvec(0,0);
     float[] dirx = new float[numcampgrounds];
-    float[] diry = new float[numcampgrounds];   
+    float[] diry = new float[numcampgrounds];
     for (int i = 0; i < numcampgrounds; i++){   
-      dirx[i] = 30*mobility*(((distconst*pow(delx[i],-3))-(distconst*pow(delx[i],-1))));
-      diry[i] = 30*mobility*(((distconst*pow(dely[i],-3))-(distconst*pow(dely[i],-1))));
+        dirr = quartic(pveclist[i].dr, 1000000, 200);
+        tempp.dr = dirr;
+        tempp.dtheta = pveclist[i].dtheta;
+        tempc = ptoc(tempp);
+        
+        dirx[i] += tempc.dx;
+        diry[i] += tempc.dy;
     }
+    
     for (int i = 0; i < numcampgrounds; i++){
       campgrounds[i].move(dirx[i],diry[i]);
     }
@@ -255,9 +372,34 @@ class Site{
     build_adjacency_list();
   }
   
-  /*float distance(Camp camp1, Camp camp2){
-    return sqrt(pow((camp1.x-camp2.x),2)+pow((camp1.y-camp2.y),2));
-  }*/
+  
+  
+  void topo_nudge(VectorField v, float influence){
+    //for each camp, push along vector field
+    
+    PVector movevector = new PVector();
+    for (int i = 0; i < numcampgrounds; i++){
+      movevector = v.getValue(campgrounds[i].x,campgrounds[i].y);
+      campgrounds[i].move(influence*-1*movevector.x, influence*-1*movevector.y);
+    }
+    
+    //move central
+    movevector = v.getValue(cc.x,cc.y);
+    cc.move(influence*-1*movevector.x, influence*-1*movevector.y);
+    
+    //rebuild adjacencies
+    build_nearest_neighbor();
+    build_adjacency_list();
+  }
+  
+  void print_campsites(){
+    for (int i = 0; i < numcampgrounds; i++){
+      println(campgrounds[i].x + "," + campgrounds[i].y);
+    }
+  }
+  
+  
+  
   
   pvec ctop(cvec c){
     float dr = sqrt(pow(c.dx,2)+pow(c.dy,2));
@@ -276,8 +418,15 @@ class Site{
     return c;
   }
   
-  float lennard_jones(float r, float c, float m){
-    return 10*m*((pow(c/r,3))-(pow(c/r,1)))/(c*c);
+  float lennard_jones(float r, float a, float b, float c){
+    //return 10*m*((pow(c/r,3))-(pow(c/r,1)))/(c*c);
+    return a*r*r - b*r - c;
+  }
+  
+  float quartic(float r, float magnitude, float dist){
+    //println(r);
+    //return magnitude * pow((r-dist),3);
+    return magnitude * (pow(r, -4) - (1/dist)*pow(r, -2));
   }
   
 }
